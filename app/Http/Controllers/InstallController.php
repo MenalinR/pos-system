@@ -14,11 +14,20 @@ class InstallController extends Controller
 {
     public function index()
     {
+        // Check if app is already installed
+        if (file_exists(storage_path('installed'))) {
+            return redirect('/')->with('message', 'Application is already installed.');
+        }
         return redirect()->route('install.requirements');
     }
 
     public function requirements()
     {
+        // Check if app is already installed
+        if (file_exists(storage_path('installed'))) {
+            return redirect('/')->with('message', 'Application is already installed.');
+        }
+
         $requirements = [
             'php_version' => '8.1',
             'extensions' => [
@@ -62,6 +71,11 @@ class InstallController extends Controller
 
     public function database()
     {
+        // Check if app is already installed
+        if (file_exists(storage_path('installed'))) {
+            return redirect('/')->with('message', 'Application is already installed.');
+        }
+
         return view('install.database');
     }
 
@@ -111,6 +125,235 @@ class InstallController extends Controller
                 'success' => false,
                 'message' => 'Database connection failed: ' . $e->getMessage()
             ]);
+        }
+    }
+
+    public function listDatabases(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'db_connection' => 'required|in:mysql,pgsql,sqlite,sqlsrv',
+            'db_host' => 'required',
+            'db_port' => 'required',
+            'db_username' => 'required',
+            'db_password' => 'nullable',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please fill all required connection fields'
+            ]);
+        }
+
+        try {
+            // Connect without specifying a database
+            Config::set('database.connections.install_list', [
+                'driver' => $request->db_connection,
+                'host' => $request->db_host,
+                'port' => $request->db_port,
+                'database' => null,
+                'username' => $request->db_username,
+                'password' => $request->db_password,
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'prefix' => '',
+                'prefix_indexes' => true,
+                'strict' => true,
+                'engine' => null,
+            ]);
+
+            $pdo = DB::connection('install_list')->getPdo();
+
+            // Get list of databases based on connection type
+            $databases = [];
+            switch ($request->db_connection) {
+                case 'mysql':
+                    $stmt = $pdo->query('SHOW DATABASES');
+                    while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                        $dbName = $row['Database'];
+                        if (!in_array($dbName, ['information_schema', 'mysql', 'performance_schema', 'sys'])) {
+                            $databases[] = $dbName;
+                        }
+                    }
+                    break;
+                case 'pgsql':
+                    $stmt = $pdo->query("SELECT datname FROM pg_database WHERE datistemplate = false AND datname != 'postgres'");
+                    while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+                        $databases[] = $row['datname'];
+                    }
+                    break;
+                default:
+                    $databases = ['sqlite' => 'SQLite databases are file-based'];
+            }
+
+            return response()->json([
+                'success' => true,
+                'databases' => $databases
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to list databases: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    public function createDatabase(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'db_connection' => 'required|in:mysql,pgsql,sqlite,sqlsrv',
+            'db_host' => 'required',
+            'db_port' => 'required',
+            'db_username' => 'required',
+            'db_password' => 'nullable',
+            'new_db_name' => 'required|string|max:64|regex:/^[a-zA-Z0-9_]+$/',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid database name. Use only letters, numbers, and underscores.',
+                'errors' => $validator->errors()
+            ]);
+        }
+
+        try {
+            // Connect without specifying a database
+            Config::set('database.connections.install_create', [
+                'driver' => $request->db_connection,
+                'host' => $request->db_host,
+                'port' => $request->db_port,
+                'database' => null,
+                'username' => $request->db_username,
+                'password' => $request->db_password,
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'prefix' => '',
+                'prefix_indexes' => true,
+                'strict' => true,
+                'engine' => null,
+            ]);
+
+            $pdo = DB::connection('install_create')->getPdo();
+
+            $dbName = $request->new_db_name;
+
+            // Create database based on connection type
+            switch ($request->db_connection) {
+                case 'mysql':
+                    $pdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+                    break;
+                case 'pgsql':
+                    $pdo->exec("CREATE DATABASE \"{$dbName}\" WITH ENCODING 'UTF8'");
+                    break;
+                default:
+                    throw new \Exception('Database creation not supported for this connection type');
+            }
+
+            // Automatically update .env file with new database configuration
+            $this->updateDatabaseInEnv($request, $dbName);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Database '{$dbName}' created successfully and .env file updated!",
+                'database_name' => $dbName,
+                'env_updated' => true
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create database: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    public function saveDatabaseConfig(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'db_connection' => 'required|in:mysql,pgsql,sqlite,sqlsrv',
+            'db_host' => 'required',
+            'db_port' => 'required',
+            'db_name' => 'required',
+            'db_username' => 'required',
+            'db_password' => 'nullable',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please fill all required fields',
+                'errors' => $validator->errors()
+            ]);
+        }
+
+        try {
+            // Update .env file with database configuration
+            $this->updateDatabaseInEnv($request, $request->db_name);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Database configuration saved to .env file!'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to save database configuration: ' . $e->getMessage()
+            ]);
+        }
+    }
+
+    private function updateDatabaseInEnv($request, $databaseName)
+    {
+        $envPath = base_path('.env');
+
+        // Ensure .env file exists
+        if (!File::exists($envPath)) {
+            $envExamplePath = base_path('.env.example');
+            if (File::exists($envExamplePath)) {
+                File::copy($envExamplePath, $envPath);
+            } else {
+                // Create a basic .env file
+                File::put($envPath, '');
+            }
+        }
+
+        // Read current .env content
+        $envContent = File::get($envPath);
+
+        // Define database updates
+        $updates = [
+            'DB_CONNECTION' => $request->db_connection,
+            'DB_HOST' => $request->db_host,
+            'DB_PORT' => $request->db_port,
+            'DB_DATABASE' => $databaseName,
+            'DB_USERNAME' => $request->db_username,
+            'DB_PASSWORD' => $request->db_password ? '"' . addslashes($request->db_password) . '"' : '""',
+        ];
+
+        // Apply each update
+        foreach ($updates as $key => $value) {
+            if (preg_match("/^{$key}=/m", $envContent)) {
+                // Replace existing key
+                $envContent = preg_replace(
+                    "/^{$key}=.*/m",
+                    "{$key}={$value}",
+                    $envContent
+                );
+            } else {
+                // Append new key
+                $envContent .= "\n{$key}={$value}";
+            }
+        }
+
+        // Write updated content back to .env
+        File::put($envPath, $envContent);
+
+        // Clear configuration cache to reload new values
+        if (function_exists('config')) {
+            Artisan::call('config:clear');
         }
     }
 
@@ -256,6 +499,11 @@ class InstallController extends Controller
             'DB_DATABASE' => $request->db_name,
             'DB_USERNAME' => $request->db_username,
             'DB_PASSWORD' => $request->db_password ? '"' . addslashes($request->db_password) . '"' : '""',
+
+            // Set proper drivers after installation
+            'SESSION_DRIVER' => 'database',
+            'CACHE_STORE' => 'database',
+            'QUEUE_CONNECTION' => 'database',
         ];
 
         $debug_messages[] = "Updates to apply: " . json_encode($updates);
