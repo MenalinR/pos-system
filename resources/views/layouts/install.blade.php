@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Laravel Installation Wizard</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Laravel Installation Wizard - v{{ time() }}</title>
     <style>
         :root {
             --primary: #ff2d20;
@@ -383,6 +387,112 @@
             border-top: 1px solid var(--gray-light);
             margin: 1rem 0;
         }
+
+        .form-section {
+            margin-bottom: 2.5rem;
+        }
+
+        .form-section h3 {
+            color: var(--dark);
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--primary);
+        }
+
+        .required {
+            color: var(--danger);
+        }
+
+        .input-group {
+            position: relative;
+        }
+
+        .input-group-append {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            z-index: 3;
+        }
+
+        .input-group-append .btn {
+            border-left: none;
+            background: transparent;
+            border: 1px solid #ddd;
+            border-left: none;
+            border-radius: 0 var(--border-radius) var(--border-radius) 0;
+            height: 100%;
+        }
+
+        .form-control.is-invalid {
+            border-color: var(--danger);
+            box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.1);
+        }
+
+        .form-control.is-valid {
+            border-color: var(--success);
+            box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
+        }
+
+        .invalid-feedback {
+            display: block;
+            color: var(--danger);
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+
+        .password-strength {
+            margin-top: 0.5rem;
+        }
+
+        .strength-meter {
+            height: 4px;
+            background-color: #e9ecef;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 0.25rem;
+        }
+
+        .strength-bar {
+            height: 100%;
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+
+        .btn-spinner {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid currentColor;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-left: 0.5rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .btn-disabled {
+            background-color: var(--gray-light) !important;
+            color: var(--gray) !important;
+            cursor: not-allowed !important;
+            border-color: var(--gray-light) !important;
+        }
+
+        .btn-primary {
+            background-color: var(--primary) !important;
+            color: white !important;
+            border-color: var(--primary) !important;
+        }
+
+        .password-toggle-icon {
+            font-size: 1.2rem;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -397,7 +507,20 @@
         </div>
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js?v={{ time() }}"></script>
+    <!-- Cache busting for development -->
+    <script>
+        // Force reload of cached content
+        if (performance.navigation.type === performance.navigation.TYPE_RELOAD) {
+            console.log('Page reloaded - clearing any cached data');
+            try {
+                sessionStorage.removeItem('install_data');
+                sessionStorage.removeItem('db_config');
+            } catch (e) {
+                console.log('Could not clear session storage:', e);
+            }
+        }
+    </script>
     @yield('scripts')
 </body>
 </html>

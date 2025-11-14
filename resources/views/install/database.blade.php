@@ -105,6 +105,24 @@
             </div>
 
             <div id="database-operation-result"></div>
+
+            <!-- Database Reset Warning -->
+            <div id="database-warning" class="alert alert-warning" style="display: none; margin-top: 1rem;">
+                <h5><i class="fas fa-exclamation-triangle"></i> Important Notice</h5>
+                <p><strong>The selected database may contain existing data.</strong></p>
+                <p>During installation, if the database contains conflicting tables, the system will:</p>
+                <ul>
+                    <li>Attempt to run migrations normally first</li>
+                    <li>If conflicts are detected, automatically reset the database and create fresh tables</li>
+                    <li><strong>This will remove all existing data in the database</strong></li>
+                </ul>
+                <div class="form-check">
+                    <input type="checkbox" class="form-check-input" id="confirm_data_loss" name="confirm_data_loss">
+                    <label class="form-check-label" for="confirm_data_loss">
+                        <strong>I understand that existing data may be lost and want to proceed</strong>
+                    </label>
+                </div>
+            </div>
         </div>
 
         <div class="form-group" id="final-db-section" style="display: none;">
@@ -212,13 +230,16 @@ function toggleDatabaseOption() {
     const selectedOption = document.querySelector('input[name="db_option"]:checked').value;
     const existingDbSection = document.getElementById('existing-db-section');
     const newDbSection = document.getElementById('new-db-section');
+    const warningSection = document.getElementById('database-warning');
 
     if (selectedOption === 'existing') {
         existingDbSection.style.display = 'block';
         newDbSection.style.display = 'none';
+        warningSection.style.display = 'block';
     } else {
         existingDbSection.style.display = 'none';
         newDbSection.style.display = 'block';
+        warningSection.style.display = 'none';
     }
 
     // Clear any previous database operation results
@@ -226,6 +247,10 @@ function toggleDatabaseOption() {
     document.getElementById('final-db-section').style.display = 'none';
     document.getElementById('test-final-connection').style.display = 'none';
     document.getElementById('continue-btn').style.display = 'none';
+
+    // Reset confirmation checkbox
+    document.getElementById('confirm_data_loss').checked = false;
+    updateContinueButton();
 }
 
 function refreshDatabaseList() {
@@ -296,6 +321,8 @@ $(document).on('change', '#existing_db_select', function() {
         setFinalDatabase(selectedDb);
         // Automatically save configuration when existing database is selected
         saveExistingDatabaseConfig(selectedDb);
+        // Update continue button state
+        updateContinueButton();
     }
 });
 
@@ -382,6 +409,35 @@ function saveDatabaseConfig() {
         window.location.href = '{{ route("install.administrator") }}';
     }, 1500);
 }
+
+function updateContinueButton() {
+    const continueBtn = document.getElementById('continue-btn');
+    const confirmCheckbox = document.getElementById('confirm_data_loss');
+    const warningSection = document.getElementById('database-warning');
+    const dbName = document.getElementById('db_name').value;
+
+    if (continueBtn && dbName) {
+        // If warning is visible, require confirmation
+        if (warningSection.style.display !== 'none') {
+            if (confirmCheckbox.checked) {
+                continueBtn.disabled = false;
+                continueBtn.title = '';
+            } else {
+                continueBtn.disabled = true;
+                continueBtn.title = 'Please confirm that you understand data may be lost';
+            }
+        } else {
+            // No warning needed, enable button
+            continueBtn.disabled = false;
+            continueBtn.title = '';
+        }
+    }
+}
+
+// Add event listener for the confirmation checkbox
+$(document).ready(function() {
+    $('#confirm_data_loss').on('change', updateContinueButton);
+});
 
 // Initialize port field on page load
 $(document).ready(function() {

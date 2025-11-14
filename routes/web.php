@@ -24,6 +24,7 @@ Route::prefix('install')->group(function () {
     Route::post('/database/create', [InstallController::class, 'createDatabase'])->name('install.database.create');
     Route::post('/database/save', [InstallController::class, 'saveDatabaseConfig'])->name('install.database.save');
     Route::get('/administrator', [InstallController::class, 'administrator'])->name('install.administrator');
+    Route::post('/administrator/validate', [InstallController::class, 'validateAdmin'])->name('install.administrator.validate');
     Route::get('/run', [InstallController::class, 'showInstall'])->name('install.run.show');
     Route::post('/run', [InstallController::class, 'install'])->name('install.run');
     Route::get('/complete', [InstallController::class, 'complete'])->name('install.complete');

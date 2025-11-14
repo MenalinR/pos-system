@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Schema;
 
 class InstallController extends Controller
 {
@@ -359,10 +360,102 @@ class InstallController extends Controller
 
     public function administrator()
     {
+        // Check if app is already installed
+        if (file_exists(storage_path('installed'))) {
+            return redirect('/')->with('message', 'Application is already installed.');
+        }
+
+        // Check if database configuration exists
+        $dbConfig = session('db_config');
+        if (!$dbConfig && !env('DB_DATABASE')) {
+            return redirect()->route('install.database')
+                ->with('error', 'Please configure the database first.');
+        }
+
         return view('install.administrator');
     }
 
-    public function showInstall()
+    public function validateAdmin(Request $request)
+    {
+        try {
+            // Log the incoming request for debugging
+            \Log::info('Admin validation request:', $request->all());
+
+            // Validate the administrator configuration
+            $validator = Validator::make($request->all(), [
+                'site_name' => 'required|string|max:255',
+                'site_url' => 'nullable|url',
+                'admin_name' => 'required|string|max:255|regex:/^[a-zA-Z\s]+$/',
+                'admin_email' => 'required|email|max:255',
+                'admin_password' => 'required|min:8|confirmed',
+                'db_connection' => 'required',
+                'db_host' => 'required',
+                'db_port' => 'required',
+                'db_name' => 'required',
+                'db_username' => 'required',
+                'db_password' => 'nullable',
+                'enable_2fa' => 'boolean',
+                'force_https' => 'boolean',
+            ], [
+                'admin_name.regex' => 'Admin name should only contain letters and spaces.',
+                'admin_password.confirmed' => 'Password confirmation does not match.',
+                'admin_password.min' => 'Password must be at least 8 characters long.',
+                'admin_email.required' => 'This will be your login email address.',
+                'admin_email.email' => 'Please enter a valid email address.',
+                'admin_email.max' => 'Email address is too long.',
+                'site_name.required' => 'Application name is required.',
+                'site_url.url' => 'Please enter a valid URL for the application URL.',
+            ]);
+
+            if ($validator->fails()) {
+                \Log::warning('Admin validation failed:', $validator->errors()->toArray());
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Please correct the validation errors.',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Test database connection with provided credentials
+            try {
+                Config::set('database.connections.install_validate', [
+                    'driver' => $request->db_connection,
+                    'host' => $request->db_host,
+                    'port' => $request->db_port,
+                    'database' => $request->db_name,
+                    'username' => $request->db_username,
+                    'password' => $request->db_password,
+                    'charset' => 'utf8mb4',
+                    'collation' => 'utf8mb4_unicode_ci',
+                    'prefix' => '',
+                    'prefix_indexes' => true,
+                    'strict' => true,
+                    'engine' => null,
+                ]);
+
+                DB::connection('install_validate')->getPdo();
+            } catch (\Exception $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Database connection failed. Please check your database credentials.',
+                    'errors' => ['database' => ['Could not connect to database: ' . $e->getMessage()]]
+                ], 422);
+            }
+
+            // If validation passes, return the validated data
+            return response()->json([
+                'success' => true,
+                'message' => 'Configuration validated successfully!',
+                'data' => $request->all()
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'An error occurred during validation: ' . $e->getMessage()
+            ], 500);
+        }
+    }    public function showInstall()
     {
         return view('install.run');
     }
@@ -377,27 +470,60 @@ class InstallController extends Controller
 
         try {
             $debug_messages[] = "=== INSTALLATION STARTED ===";
+            $debug_messages[] = "Request method: " . $request->method();
+            $debug_messages[] = "Request headers: " . json_encode($request->headers->all());
+            $debug_messages[] = "Request data received: " . json_encode($request->all());
+            $debug_messages[] = "Request input count: " . count($request->all());
+
+            // Log this info
+            \Log::info('Installation request details', [
+                'method' => $request->method(),
+                'all_data' => $request->all(),
+                'input_count' => count($request->all())
+            ]);
+
+            // Check if we have any data at all
+            if (count($request->all()) == 0) {
+                $debug_messages[] = "ERROR: No input data received";
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No installation data received. Please go back and fill in the administrator form.',
+                    'debug' => $debug_messages
+                ], 400);
+            }
 
             // STEP 1: Validate input
             $debug_messages[] = "STEP 1: Validating input...";
             $validator = Validator::make($request->all(), [
                 'site_name' => 'required|string|max:255',
                 'admin_name' => 'required|string|max:255',
-                'admin_email' => 'required|email',
+                'admin_email' => 'required|email|max:255',
                 'admin_password' => 'required|min:8',
                 'db_connection' => 'required',
                 'db_host' => 'required',
                 'db_port' => 'required',
                 'db_name' => 'required',
                 'db_username' => 'required',
-                'db_password' => 'nullable',
+            ], [
+                'site_name.required' => 'Application name is required.',
+                'admin_name.required' => 'Admin name is required.',
+                'admin_email.required' => 'Admin email is required.',
+                'admin_email.email' => 'Please enter a valid email address.',
+                'admin_password.required' => 'Admin password is required.',
+                'admin_password.min' => 'Password must be at least 8 characters long.',
+                'db_name.required' => 'Database name is required.',
+                'db_connection.required' => 'Database connection type is required.',
+                'db_host.required' => 'Database host is required.',
+                'db_port.required' => 'Database port is required.',
+                'db_username.required' => 'Database username is required.',
             ]);
 
             if ($validator->fails()) {
                 $debug_messages[] = "VALIDATION FAILED: " . json_encode($validator->errors()->toArray());
+                \Log::warning('Installation validation failed', $validator->errors()->toArray());
                 return response()->json([
                     'success' => false,
-                    'message' => 'Validation failed',
+                    'message' => 'Validation failed. Please check your input data.',
                     'errors' => $validator->errors(),
                     'debug' => $debug_messages
                 ], 422);
@@ -420,10 +546,43 @@ class InstallController extends Controller
             $this->testDatabaseConnectionAfterEnvUpdate($request, $debug_messages);
             $debug_messages[] = "✓ Database connection test passed";
 
-            // STEP 5: Run migrations
-            $debug_messages[] = "STEP 5: Running migrations...";
-            $migrationOutput = Artisan::call('migrate', ['--force' => true]);
-            $debug_messages[] = "✓ Migrations completed. Exit code: " . $migrationOutput;
+            // STEP 5: Handle migrations intelligently
+            $debug_messages[] = "STEP 5: Checking and running migrations...";
+
+            try {
+                // Check for existing tables that might conflict
+                $conflictingTables = $this->checkForConflictingTables();
+
+                if (count($conflictingTables) > 0) {
+                    $debug_messages[] = "Found existing tables: " . implode(', ', $conflictingTables);
+                    $debug_messages[] = "Running fresh migration to handle existing tables...";
+
+                    // Run fresh migration to clean up and recreate
+                    Artisan::call('migrate:fresh', ['--force' => true]);
+                    $debug_messages[] = "✓ Fresh migrations completed successfully";
+                } else {
+                    $debug_messages[] = "No conflicting tables found, running normal migration...";
+                    Artisan::call('migrate', ['--force' => true]);
+                    $debug_messages[] = "✓ Migrations completed successfully";
+                }
+
+            } catch (\Exception $e) {
+                $debug_messages[] = "Migration error: " . $e->getMessage();
+
+                // If migration fails due to existing tables, try migrate:fresh
+                if (strpos($e->getMessage(), 'already exists') !== false || strpos($e->getMessage(), 'Base table') !== false) {
+                    $debug_messages[] = "Detected table conflict, attempting fresh migration...";
+                    try {
+                        Artisan::call('migrate:fresh', ['--force' => true]);
+                        $debug_messages[] = "✓ Fresh migration resolved the conflict";
+                    } catch (\Exception $freshException) {
+                        $debug_messages[] = "Fresh migration also failed: " . $freshException->getMessage();
+                        throw new \Exception("Database migration failed. Please ensure the database is empty or has proper permissions. Error: " . $freshException->getMessage());
+                    }
+                } else {
+                    throw $e;
+                }
+            }
 
             // STEP 6: Create admin user
             $debug_messages[] = "STEP 6: Creating admin user...";
@@ -452,12 +611,24 @@ class InstallController extends Controller
             $debug_messages[] = "Error: " . $e->getMessage();
             $debug_messages[] = "File: " . $e->getFile();
             $debug_messages[] = "Line: " . $e->getLine();
-            $debug_messages[] = "Trace: " . $e->getTraceAsString();
+            $debug_messages[] = "Exception Class: " . get_class($e);
+
+            // Log the full error
+            \Log::error('Installation failed', [
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+                'request_data' => $request->all()
+            ]);
 
             return response()->json([
                 'success' => false,
                 'message' => 'Installation failed: ' . $e->getMessage(),
-                'debug' => $debug_messages
+                'debug' => $debug_messages,
+                'errors' => [
+                    'installation' => [$e->getMessage()]
+                ]
             ], 500);
         }
     }
@@ -491,7 +662,7 @@ class InstallController extends Controller
             'APP_NAME' => '"' . addslashes($request->site_name) . '"',
             'APP_ENV' => 'production',
             'APP_DEBUG' => 'false',
-            'APP_URL' => 'http://localhost:8000',
+            'APP_URL' => $request->site_url ?: 'http://localhost:8000',
 
             'DB_CONNECTION' => $request->db_connection,
             'DB_HOST' => $request->db_host,
@@ -504,9 +675,7 @@ class InstallController extends Controller
             'SESSION_DRIVER' => 'database',
             'CACHE_STORE' => 'database',
             'QUEUE_CONNECTION' => 'database',
-        ];
-
-        $debug_messages[] = "Updates to apply: " . json_encode($updates);
+        ];        $debug_messages[] = "Updates to apply: " . json_encode($updates);
 
         // Apply each update
         foreach ($updates as $key => $value) {
@@ -609,6 +778,37 @@ class InstallController extends Controller
 
         $debug_messages[] = "Admin user created successfully: " . $user->email;
         return $user;
+    }
+
+    private function checkForConflictingTables()
+    {
+        $conflictingTables = [];
+
+        // Common Laravel tables that might exist
+        $tablesToCheck = [
+            'users',
+            'cache',
+            'cache_locks',
+            'jobs',
+            'job_batches',
+            'failed_jobs',
+            'password_reset_tokens',
+            'sessions',
+            'migrations'
+        ];
+
+        try {
+            foreach ($tablesToCheck as $table) {
+                if (Schema::hasTable($table)) {
+                    $conflictingTables[] = $table;
+                }
+            }
+        } catch (\Exception $e) {
+            // If we can't check tables, assume there might be conflicts
+            // This could happen with permission issues
+        }
+
+        return $conflictingTables;
     }
 
     public function complete()
