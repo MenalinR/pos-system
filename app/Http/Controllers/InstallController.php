@@ -22,14 +22,14 @@ class InstallController extends Controller
         $requirements = [
             'php_version' => '8.1',
             'extensions' => [
-                'bcmath', 'ctype', 'curl', 'dom', 'fileinfo', 'json', 
+                'bcmath', 'ctype', 'curl', 'dom', 'fileinfo', 'json',
                 'mbstring', 'openssl', 'pdo', 'tokenizer', 'xml'
             ],
         ];
 
         $phpVersion = phpversion();
         $phpSupported = version_compare($phpVersion, $requirements['php_version'], '>=');
-        
+
         $extensions = [];
         foreach ($requirements['extensions'] as $extension) {
             $extensions[$extension] = extension_loaded($extension);
@@ -52,7 +52,7 @@ class InstallController extends Controller
             }
         }
 
-        $allRequirementsMet = $phpSupported && !in_array(false, $extensions) && 
+        $allRequirementsMet = $phpSupported && !in_array(false, $extensions) &&
                              collect($permissions)->every(fn($perm) => $perm['writable']);
 
         return view('install.requirements', compact(
@@ -242,14 +242,14 @@ class InstallController extends Controller
         // Read the current .env content
         $envContent = File::get($envPath);
         $debug_messages[] = "Current .env content length: " . strlen($envContent);
-        
+
         // Define all the updates we need to make
         $updates = [
             'APP_NAME' => '"' . addslashes($request->site_name) . '"',
             'APP_ENV' => 'production',
             'APP_DEBUG' => 'false',
             'APP_URL' => 'http://localhost:8000',
-            
+
             'DB_CONNECTION' => $request->db_connection,
             'DB_HOST' => $request->db_host,
             'DB_PORT' => $request->db_port,
@@ -263,7 +263,7 @@ class InstallController extends Controller
         // Apply each update
         foreach ($updates as $key => $value) {
             $debug_messages[] = "Processing key: {$key} = {$value}";
-            
+
             // Check if the key exists in the file
             if (preg_match("/^{$key}=/m", $envContent)) {
                 // Replace existing key
@@ -282,12 +282,12 @@ class InstallController extends Controller
 
         // Write the updated content back to .env
         File::put($envPath, $envContent);
-        
+
         // Verify the file was written
         if (!File::exists($envPath)) {
             throw new \Exception('Failed to write .env file');
         }
-        
+
         $newContent = File::get($envPath);
         $debug_messages[] = "New .env content length: " . strlen($newContent);
         $debug_messages[] = "Environment file update completed";
@@ -313,7 +313,7 @@ class InstallController extends Controller
         // Purge and reconnect
         DB::purge('mysql');
         DB::reconnect('mysql');
-        
+
         // Test connection
         try {
             $pdo = DB::connection('mysql')->getPdo();
