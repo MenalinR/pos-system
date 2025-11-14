@@ -43,8 +43,11 @@ class InstallController extends Controller
 
         foreach ($paths as $name => $path) {
             if (File::exists($path)) {
+                $currentPermissions = substr(sprintf('%o', fileperms($path)), -4);
                 $permissions[$name] = [
-                    'writable' => is_writable($path)
+                    'writable' => is_writable($path),
+                    'current' => $currentPermissions,
+                    'required' => '0755'
                 ];
             }
         }
